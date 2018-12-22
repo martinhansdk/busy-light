@@ -2,8 +2,11 @@ package main
 
 import (
 	"encoding/json"
-	"fmt" 
+	"fmt"
+	"github.com/tarm/serial"
 	"net"
+	"log"
+	"path/filepath"
 	"regexp"
 )
 
@@ -14,6 +17,12 @@ var regexes = [...]*regexp.Regexp {
 	regexp.MustCompile("p4 sync"),
 }
 
+var event2pattern = map[string]byte{
+    "start":  'f',
+    "stop":   '+',
+}
+
+
 type EventMessage struct {
 	Event string
 	Cmdline string
@@ -23,6 +32,27 @@ type EventMessage struct {
 }
 
 func main() {
+	var serport *serial.Port;
+
+	serialPorts, err := filepath.Glob("/dev/ttyUSB*")
+	
+	if err != nil {
+		log.Fatal(err)
+	}
+	for i := range serialPorts {
+		config := &serial.Config{Name: serialPorts[i], Baud: 9600}
+		serport, err = serial.OpenPort(config)
+		
+		if err != nil {
+			// ok, try the next port
+			log.Printf("Could not open port %s: %s", serialPorts[i], err)
+		} else {
+			log.Printf("Opened port %s", serialPorts[i])
+			break
+		}
+	}
+
+	
 	msg := make([]byte, MAX_LEN)
 	addr := net.UDPAddr{
 		Port: 5050,
@@ -49,23 +79,24 @@ func main() {
 			}
 			fmt.Printf("%+v\n", eventMessage)
 
-			filterMessage(eventMessage);
+			filterMessage(eventMessage, serport);
 		}
 	}
 }
 
-func filterMessage(eventMessage EventMessage) {
+func filterMessage(eventMessage EventMessage, serport *serial.Port) {
 	if(eventMessage.Event != "start" && eventMessage.Event != "stop") {
 		return
 	}
 	
 	for _, re := range regexes {
 		if(re.MatchString(eventMessage.Cmdline)) {
-			processEvent(eventMessage)
+			processEvent(eventMessage, serport)
 		}
 	}
 }
 
-func processEvent(eventMessage EventMessage) {
+func processEvent(eventMessage EventMessage, serport *serial.Port) {
 	fmt.Printf("%s : %s : %s\n", eventMessage.Event, eventMessage.Shellid, eventMessage.Cmdline)
+	serport.Write([]byte{event2pattern[eventMessage.Event]});
 }
